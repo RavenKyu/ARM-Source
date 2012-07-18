@@ -6,7 +6,8 @@ void INIT(void);
 int main(void)
 {
 	volatile unsigned int i_count;
-	INIT();
+
+        INIT();                 /* 초기화 함수 호출 */
 	
 	while(1)
 	{
@@ -19,7 +20,7 @@ int main(void)
 	return 0;
 }
 
-void INIT(void)
+void INIT(void)                 /* 초기화 함수모음 호출 */
 {
 	INIT_LED();
 	return;
