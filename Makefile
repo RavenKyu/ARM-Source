@@ -44,7 +44,7 @@ endif
 
 OBJS+= lowlevel.o \
        main.o \
-       LED.o
+	LED.o 	
 
 all: sram flash
 
@@ -62,7 +62,7 @@ main.o: main.c
 	$(CC) -c $(CCFLAGS) main.c -o main.o
 
 LED.o: LED.c
-	$(CC) -c $(CCFLAGS) LED.c -o LED.o	
+	$(CC) -c $(CCFLAGS) LED.c -o LED.o
 
 lowlevel.o: lowlevel.c
 	$(CC) -c $(CCFLAGS) lowlevel.c -o lowlevel.o

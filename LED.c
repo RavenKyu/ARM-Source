@@ -3,7 +3,7 @@
 
 void INIT_LED(void)
 {
-    PMC_PCER = (1 << PIOA); 
+    PMC_PCER    = (1 << PIOA); 
     
     PIO_OWER    = (1 << LED_PIN);
     PIO_PER     = (1 << LED_PIN);
