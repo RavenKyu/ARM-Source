@@ -1,0 +1,202 @@
+#include "project.h"
+
+#define TOP_OF_MEMORY    (AT91C_ISRAM + AT91C_ISRAM_SIZE)
+#define ABT_STACK_SIZE   8*3*4
+#define IRQ_STACK_SIZE   8*3*4
+
+#define ARM_MODE_ABT     0x17
+#define ARM_MODE_FIQ     0x11
+#define ARM_MODE_IRQ     0x12
+#define ARM_MODE_SVC     0x13
+
+#define I_BIT            0x80
+#define F_BIT            0x40
+
+
+/* Application startup entry point */
+        .globl reset_handler
+        .align 4
+
+.section .vectors
+.arm
+        
+
+/* Exception vectors (should be a branch to be detected as a valid code by the rom */
+_exception_vectors:
+reset_vector:
+        ldr		pc, =reset_handler
+undef_vector:
+        b		undef_vector    /* Undefined Instruction */
+swi_vector:
+        b		swi_vector      /* Software Interrupt */
+pabt_vector:
+        b		pabt_vector     /* Prefetch Abort */
+dabt_vector:
+        b		dabt_vector     /* Data Abort */
+rsvd_vector:
+        b		rsvd_vector     /* reserved */
+irq_vector:
+        b		irq_handler     /* IRQ : read the AIC */
+fiq_vector:
+/*------------------------------------------------------------------------------
+ *- Function             : fiq_handler
+ *- Treatments           : FIQ Interrupt Handler.
+ *- Called Functions     : 
+ *------------------------------------------------------------------------------*/
+fiq_handler:
+		b		fiq_handler
+	
+/*------------------------------------------------------------------------------
+ *- Function             : irq_handler
+ *- Treatments           : IRQ Controller Interrupt Handler.
+ *- Called Functions     : AIC_IVR[interrupt]
+ *------------------------------------------------------------------------------*/
+irq_handler:
+/*- Manage Exception Entry */
+/*- Adjust and save LR_irq in IRQ stack */
+        sub      lr, lr, #4
+        stmfd    sp!, {lr}
+/*- Save r0 and SPSR in IRQ stack */
+        mrs      r14, SPSR
+        stmfd    sp!, {r0,r14}
+
+/*- Write in the IVR to support Protect Mode */
+/*- No effect in Normal Mode */
+/*- De-assert the NIRQ and clear the source in Protect Mode */
+        ldr      r14, =AT91C_BASE_AIC
+        ldr      r0 , [r14, #AIC_IVR]
+        str      r14, [r14, #AIC_IVR]
+
+/*- Enable Interrupt and Switch in Supervisor Mode */
+        msr      CPSR_c, #ARM_MODE_SVC
+
+/*- Save scratch/used registers and LR in User Stack */
+        stmfd    sp!, {r1-r3, r12, r14}
+
+/*- Branch to the routine pointed by the AIC_IVR */
+        mov      r14, pc
+        bx       r0
+
+/*- Restore scratch/used registers and LR from User Stack */
+        ldmia    sp!, {r1-r3, r12, r14}
+
+/*- Disable Interrupt and switch back in IRQ mode */
+        msr      CPSR_c, #ARM_MODE_IRQ | I_BIT
+
+/*- Mark the End of Interrupt on the AIC */
+        ldr      r14, =AT91C_BASE_AIC
+        str      r14, [r14, #AIC_EOICR]
+
+/*- Restore SPSR_irq and r0 from IRQ stack */
+        ldmia    sp!, {r0,r14}
+        msr      SPSR_cxsf, r14
+
+/*- Restore adjusted  LR_irq from IRQ stack directly in the PC */
+        ldmia    sp!, {pc}^
+
+/*------------------------------------------------------------------------------
+ *- Function             : reset_handler
+ *- Treatments           : Reset Interrupt Handler.
+ *- Called Functions     : lowlevel_init
+ *                         main
+ *------------------------------------------------------------------------------*/
+.section .text
+reset_handler:
+	ldr     pc, =_low_level_init
+
+/*------------------------------------------------------------------------------
+ *- Low level Init is performed in a C function: lowlevel_init
+ *- Init Stack Pointer to a valid memory area before calling lowlevel_init
+ *------------------------------------------------------------------------------*/
+/*- Temporary stack in internal RAM for Low Level Init execution */
+_low_level_init:
+	ldr      r2, =_lp_ll_init
+        ldmia    r2, {r0, r1}
+        mov      sp, r1
+        mov      lr, pc
+        bx       r0                      /* Branch on C function (interworking) */
+
+/*------------------------------------------------------------------------------
+ *- Remap SRAM at 0x0
+ *------------------------------------------------------------------------------*/
+_remap:
+        ldr r2, _lp_remap
+        mov r0, #AT91C_MC_RCB
+        str r0, [r2]
+
+/*------------------------------------------------------------------------------
+ *- Setup the stack for each mode
+ *------------------------------------------------------------------------------*/
+_stack_init:
+	ldr      r2, =_lp_stack_init
+        ldmia    r2, {r0, r1, r2}
+
+/*- Set up Abort Mode and set ABT Mode Stack */
+        msr      CPSR_c, #ARM_MODE_ABT | I_BIT | F_BIT
+        mov      sp, r0
+        sub      r0, r0, r1
+
+/*- Set up Interrupt Mode and set IRQ Mode Stack */
+        msr      CPSR_c, #ARM_MODE_IRQ | I_BIT | F_BIT
+        mov      sp, r0
+        sub      r0, r0, r2
+
+/*- Enable interrupt & Set up Supervisor Mode and set Supervisor Mode Stack */
+        msr      CPSR_c, #ARM_MODE_SVC | F_BIT
+        mov      sp, r0
+
+/*------------------------------------------------------------------------------
+ *- Segments initialization
+ *------------------------------------------------------------------------------*/
+/* Copy the data section in RAM at 0x0000 */
+_init_data:
+	ldr      r2, =_lp_data
+        ldmia    r2, {r1, r3, r4}
+1:
+        cmp      r3, r4
+        ldrcc    r2, [r1], #4
+        strcc    r2, [r3], #4
+        bcc      1b
+
+/* Clear the bss segment */
+_init_bss:
+	ldr      r2, =_lp_bss
+        ldmia    r2, {r3, r4}
+        mov      r2, #0
+1:
+        cmp      r3, r4
+        strcc    r2, [r3], #4
+        bcc      1b
+
+/*------------------------------------------------------------------------------
+ *- Branch to the main
+ *------------------------------------------------------------------------------*/
+_branch_main:
+        ldr      r0, =main
+        mov      lr, pc
+        bx       r0
+
+/*------------------------------------------------------------------------------
+ *- Litteral pools
+ *------------------------------------------------------------------------------*/
+_lp_ll_init:
+        .word    lowlevel_init
+        .word    TOP_OF_MEMORY              /* Default SVC stack after power up */ 
+
+_lp_remap:
+        .word    AT91C_MC_RCR
+
+_lp_stack_init:
+        .word    TOP_OF_MEMORY             /* Top of the stack */
+        .word    ABT_STACK_SIZE            /* ABT stack size */
+        .word    IRQ_STACK_SIZE            /* IRQ stack size */
+
+_lp_bss:
+        .word    _sbss
+        .word    _ebss
+
+_lp_data:
+        .word    _etext
+        .word    _sdata
+        .word    _edata
+
