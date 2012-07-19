@@ -13,7 +13,7 @@ int main(void)
 	{
 		for(i_count = 0; i_count <= 100000; i_count++);
 
-		LED_TOGGLE();
+		//LED_TOGGLE();
 	}
 	
 	while(1);	
